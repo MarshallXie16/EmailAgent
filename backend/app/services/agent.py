@@ -1,0 +1,487 @@
+"""Agent service with tools for email response generation."""
+
+from typing import Dict, Any, List, Optional
+import json
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.listing import Listing, ListingDocumentChunk
+from app.models.lead import NDA, NDAStatus
+from app.models.broker import BrokerSettings
+from app.services.openai_service import OpenAIService
+
+
+class AgentTools:
+    """Tools available to the LLM agent."""
+
+    def __init__(self, db: AsyncSession):
+        """Initialize tools with database session."""
+        self.db = db
+
+    async def identify_listing(self, email_text: str, broker_id: str) -> Dict[str, Any]:
+        """
+        Identify listing from email text by matching code or title.
+
+        Args:
+            email_text: Email content
+            broker_id: Broker UUID
+
+        Returns:
+            Dict with listing_id and confidence
+        """
+        # Search for listings that match keywords in email
+        result = await self.db.execute(
+            select(Listing).where(
+                Listing.broker_id == broker_id,
+                Listing.status == "active",
+            )
+        )
+        listings = result.scalars().all()
+
+        # Simple keyword matching (can be improved with NLP)
+        best_match = None
+        best_score = 0
+
+        for listing in listings:
+            score = 0
+
+            # Check if code is mentioned
+            if listing.code.lower() in email_text.lower():
+                score += 10
+
+            # Check if title words are mentioned
+            title_words = listing.title.lower().split()
+            for word in title_words:
+                if len(word) > 3 and word in email_text.lower():
+                    score += 2
+
+            if score > best_score:
+                best_score = score
+                best_match = listing
+
+        if best_match and best_score >= 5:
+            return {
+                "listing_id": str(best_match.id),
+                "listing_code": best_match.code,
+                "listing_title": best_match.title,
+                "confidence": min(best_score / 20.0, 1.0),
+            }
+
+        return {"listing_id": None, "confidence": 0.0}
+
+    async def get_listing_summary(self, listing_id: str) -> Dict[str, Any]:
+        """
+        Get public listing summary (non-sensitive info).
+
+        Args:
+            listing_id: Listing UUID
+
+        Returns:
+            Dict with listing details
+        """
+        result = await self.db.execute(
+            select(Listing).where(Listing.id == listing_id)
+        )
+        listing = result.scalar_one_or_none()
+
+        if not listing:
+            return {"error": "Listing not found"}
+
+        return {
+            "code": listing.code,
+            "title": listing.title,
+            "asking_price": float(listing.asking_price) if listing.asking_price else None,
+            "location_region": listing.location_region,
+            "short_description": listing.short_description,
+            "status": listing.status.value,
+        }
+
+    async def search_listing_knowledge(
+        self, listing_id: str, query: str, limit: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Search listing documents using vector similarity (RAG).
+
+        Args:
+            listing_id: Listing UUID
+            query: Search query
+            limit: Number of results
+
+        Returns:
+            List of relevant chunks
+        """
+        # Generate query embedding
+        openai_service = OpenAIService()
+        query_embedding = openai_service.create_embedding(query)
+
+        if not query_embedding:
+            return []
+
+        # TODO: Implement proper pgvector similarity search
+        # For now, return empty (this requires pgvector extension setup)
+        # Example query would be:
+        # SELECT content, metadata, embedding <-> query_embedding as distance
+        # FROM listing_document_chunks
+        # WHERE listing_document_id IN (
+        #   SELECT id FROM listing_documents WHERE listing_id = listing_id
+        # )
+        # ORDER BY distance
+        # LIMIT limit
+
+        return []
+
+    async def get_nda_status(self, lead_id: str, listing_id: str) -> Dict[str, Any]:
+        """
+        Check NDA status for a lead and listing.
+
+        Args:
+            lead_id: Lead UUID
+            listing_id: Listing UUID
+
+        Returns:
+            Dict with NDA status
+        """
+        result = await self.db.execute(
+            select(NDA).where(
+                NDA.lead_id == lead_id,
+                NDA.listing_id == listing_id,
+            )
+        )
+        nda = result.scalar_one_or_none()
+
+        if not nda:
+            return {"status": "none", "signed": False}
+
+        return {
+            "status": nda.status.value,
+            "signed": nda.status == NDAStatus.SIGNED,
+            "signed_at": nda.signed_at.isoformat() if nda.signed_at else None,
+        }
+
+    async def generate_nda_link(
+        self, lead_id: str, listing_id: str, broker_id: str
+    ) -> str:
+        """
+        Generate NDA link for lead.
+
+        Args:
+            lead_id: Lead UUID
+            listing_id: Listing UUID
+            broker_id: Broker UUID
+
+        Returns:
+            NDA URL
+        """
+        # Get broker settings for default NDA URL
+        result = await self.db.execute(
+            select(BrokerSettings).where(BrokerSettings.broker_id == broker_id)
+        )
+        settings = result.scalar_one_or_none()
+
+        if not settings or not settings.default_nda_url:
+            return "Please contact us for NDA details"
+
+        # Append query params for tracking
+        nda_url = settings.default_nda_url
+        nda_url += f"?lead_id={lead_id}&listing_id={listing_id}"
+
+        return nda_url
+
+    async def get_broker_settings(self, broker_id: str) -> Dict[str, Any]:
+        """
+        Get broker settings (calendly link, etc.).
+
+        Args:
+            broker_id: Broker UUID
+
+        Returns:
+            Dict with settings
+        """
+        result = await self.db.execute(
+            select(BrokerSettings).where(BrokerSettings.broker_id == broker_id)
+        )
+        settings = result.scalar_one_or_none()
+
+        if not settings:
+            return {}
+
+        return {
+            "calendly_link": settings.calendly_link,
+            "auto_send_enabled": settings.auto_send_enabled,
+        }
+
+
+class AgentService:
+    """Agent orchestration service."""
+
+    def __init__(self, db: AsyncSession):
+        """Initialize agent with database and services."""
+        self.db = db
+        self.openai_service = OpenAIService()
+        self.tools = AgentTools(db)
+
+    def get_system_prompt(self) -> str:
+        """
+        Get the system prompt for the agent.
+
+        Returns:
+            System prompt string
+        """
+        return """You are an AI assistant helping a business broker respond to email inquiries about business listings.
+
+Your role:
+- Answer questions about listings using available data
+- Gate sensitive information behind NDA requirements
+- Encourage high-intent leads to book meetings
+- Escalate uncertain or complex questions to the broker
+
+Guidelines:
+1. Be professional, friendly, and concise
+2. NEVER make up information - only use data from tools
+3. For confidential details (full financials, exact address, customer lists):
+   - Check NDA status first
+   - If no signed NDA, politely request one and provide link
+4. For high-intent leads (serious questions, financial capability), include Calendly booking link
+5. If uncertain or question is legal/tax-related, escalate to broker
+6. Keep responses under 200 words
+
+Available tools:
+- identify_listing: Find which listing an email is about
+- get_listing_summary: Get basic public listing info
+- search_listing_knowledge: Search uploaded listing documents
+- get_nda_status: Check if lead has signed NDA
+- generate_nda_link: Get NDA URL for lead
+- get_broker_settings: Get broker's Calendly link
+
+When to escalate:
+- Question not answerable with available data
+- Legal, tax, or financial advice requests
+- Angry or complaint emails
+- Ambiguous listing identification
+- Confidence < 70%
+"""
+
+    def create_tool_definitions(self) -> List[Dict[str, Any]]:
+        """
+        Create OpenAI function definitions for tools.
+
+        Returns:
+            List of tool definitions
+        """
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "identify_listing",
+                    "description": "Identify which listing the email is about by matching listing code or title",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "email_text": {
+                                "type": "string",
+                                "description": "The email text to search for listing references",
+                            }
+                        },
+                        "required": ["email_text"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_listing_summary",
+                    "description": "Get public summary of a listing (price, location, description)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "listing_id": {
+                                "type": "string",
+                                "description": "UUID of the listing",
+                            }
+                        },
+                        "required": ["listing_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_nda_status",
+                    "description": "Check if a lead has signed an NDA for a listing",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "lead_id": {"type": "string", "description": "UUID of the lead"},
+                            "listing_id": {"type": "string", "description": "UUID of the listing"},
+                        },
+                        "required": ["lead_id", "listing_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "generate_nda_link",
+                    "description": "Generate NDA link for a lead",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "lead_id": {"type": "string"},
+                            "listing_id": {"type": "string"},
+                            "broker_id": {"type": "string"},
+                        },
+                        "required": ["lead_id", "listing_id", "broker_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_broker_settings",
+                    "description": "Get broker settings including Calendly link",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "broker_id": {"type": "string", "description": "UUID of the broker"}
+                        },
+                        "required": ["broker_id"],
+                    },
+                },
+            },
+        ]
+
+    async def execute_tool(
+        self, tool_name: str, arguments: Dict[str, Any], broker_id: str
+    ) -> Any:
+        """
+        Execute a tool by name.
+
+        Args:
+            tool_name: Name of the tool
+            arguments: Tool arguments
+            broker_id: Broker UUID
+
+        Returns:
+            Tool result
+        """
+        if tool_name == "identify_listing":
+            return await self.tools.identify_listing(
+                arguments["email_text"], broker_id
+            )
+
+        elif tool_name == "get_listing_summary":
+            return await self.tools.get_listing_summary(arguments["listing_id"])
+
+        elif tool_name == "search_listing_knowledge":
+            return await self.tools.search_listing_knowledge(
+                arguments["listing_id"], arguments["query"]
+            )
+
+        elif tool_name == "get_nda_status":
+            return await self.tools.get_nda_status(
+                arguments["lead_id"], arguments["listing_id"]
+            )
+
+        elif tool_name == "generate_nda_link":
+            return await self.tools.generate_nda_link(
+                arguments["lead_id"], arguments["listing_id"], arguments["broker_id"]
+            )
+
+        elif tool_name == "get_broker_settings":
+            return await self.tools.get_broker_settings(arguments["broker_id"])
+
+        else:
+            return {"error": f"Unknown tool: {tool_name}"}
+
+    async def generate_response(
+        self,
+        conversation_history: List[Dict[str, str]],
+        broker_id: str,
+        lead_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a response to an email using the LLM agent.
+
+        Args:
+            conversation_history: List of messages in conversation
+            broker_id: Broker UUID
+            lead_id: Optional lead UUID
+
+        Returns:
+            Dict with response text, tool calls, confidence, action
+        """
+        # Build messages
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            *conversation_history,
+        ]
+
+        # Get tool definitions
+        tools = self.create_tool_definitions()
+
+        # Call LLM
+        response = self.openai_service.chat_completion(
+            messages=messages,
+            tools=tools,
+            temperature=0.7,
+        )
+
+        tools_called = []
+
+        # Execute tools if any
+        if response.get("tool_calls"):
+            for tool_call in response["tool_calls"]:
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+
+                # Execute tool
+                tool_result = await self.execute_tool(tool_name, tool_args, broker_id)
+
+                tools_called.append({
+                    "name": tool_name,
+                    "arguments": tool_args,
+                    "result": tool_result,
+                })
+
+                # Add tool result to messages and call LLM again
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [tool_call],
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(tool_result),
+                })
+
+            # Get final response after tool execution
+            response = self.openai_service.chat_completion(
+                messages=messages,
+                temperature=0.7,
+            )
+
+        # Determine final action and confidence
+        final_action = "answer"  # Default
+        confidence = 0.8  # Default
+
+        response_text = response.get("content", "")
+
+        # Simple heuristics for action determination
+        if "escalate" in response_text.lower() or "forward" in response_text.lower():
+            final_action = "escalate"
+            confidence = 0.3
+
+        elif "nda" in response_text.lower():
+            final_action = "ask_nda"
+
+        elif "meeting" in response_text.lower() or "call" in response_text.lower():
+            final_action = "book_meeting"
+
+        return {
+            "response_text": response_text,
+            "tools_called": tools_called,
+            "confidence": confidence,
+            "final_action": final_action,
+            "usage": response.get("usage", {}),
+        }
