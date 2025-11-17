@@ -3,20 +3,22 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_broker
 from app.core.database import get_db
 from app.models.broker import Broker
-from app.models.listing import Listing, ListingStatus
+from app.models.listing import Listing, ListingStatus, ListingDocument, DocumentType
 from app.schemas.listing import (
     ListingResponse,
     ListingCreate,
     ListingUpdate,
     ListingListResponse,
 )
+from app.services.s3 import S3Service
+from app.workers.tasks import ingest_document_task
 
 router = APIRouter()
 
@@ -224,3 +226,157 @@ async def delete_listing(
 
     listing.status = ListingStatus.ARCHIVED
     await db.commit()
+
+
+@router.post("/{listing_id}/documents", status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    listing_id: UUID,
+    file: UploadFile = File(...),
+    document_type: DocumentType = Form(...),
+    title: Optional[str] = Form(None),
+    current_broker: Broker = Depends(get_current_broker),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload a document to a listing.
+
+    Uploads file to S3 and triggers background job for text extraction and embedding.
+
+    Args:
+        listing_id: Listing UUID
+        file: Uploaded file (PDF, DOCX, TXT)
+        document_type: Type of document (teaser, cim_excerpt, faq, internal_notes)
+        title: Optional document title
+        current_broker: Authenticated broker
+        db: Database session
+
+    Returns:
+        Document record
+    """
+    # Verify listing exists and belongs to broker
+    result = await db.execute(
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.broker_id == current_broker.id,
+        )
+    )
+    listing = result.scalar_one_or_none()
+
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found",
+        )
+
+    # Validate file type
+    allowed_extensions = {".pdf", ".docx", ".txt"}
+    file_ext = "." + file.filename.split(".")[-1].lower() if "." in file.filename else ""
+
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File type not allowed. Allowed: {', '.join(allowed_extensions)}",
+        )
+
+    # Read file content
+    file_content = await file.read()
+
+    if len(file_content) > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds 10MB limit",
+        )
+
+    # Generate S3 path
+    s3_path = f"brokers/{current_broker.id}/listings/{listing_id}/{document_type.value}/{file.filename}"
+
+    # Upload to S3
+    s3_service = S3Service()
+    upload_success = s3_service.upload_file(file_content, s3_path)
+
+    if not upload_success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload file to storage",
+        )
+
+    # Create document record
+    document = ListingDocument(
+        listing_id=listing_id,
+        file_url=s3_path,
+        type=document_type,
+        title=title or file.filename,
+    )
+    db.add(document)
+    await db.commit()
+    await db.refresh(document)
+
+    # Trigger background ingestion job
+    ingest_document_task.delay(document.id)
+
+    return {
+        "id": document.id,
+        "listing_id": str(listing_id),
+        "file_url": s3_path,
+        "type": document_type.value,
+        "title": document.title,
+        "created_at": document.created_at.isoformat(),
+        "status": "processing",
+        "message": "Document uploaded successfully. Text extraction and embedding in progress.",
+    }
+
+
+@router.get("/{listing_id}/documents")
+async def get_listing_documents(
+    listing_id: UUID,
+    current_broker: Broker = Depends(get_current_broker),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all documents for a listing.
+
+    Args:
+        listing_id: Listing UUID
+        current_broker: Authenticated broker
+        db: Database session
+
+    Returns:
+        List of documents
+    """
+    # Verify listing belongs to broker
+    result = await db.execute(
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.broker_id == current_broker.id,
+        )
+    )
+    listing = result.scalar_one_or_none()
+
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found",
+        )
+
+    # Get documents
+    docs_result = await db.execute(
+        select(ListingDocument)
+        .where(ListingDocument.listing_id == listing_id)
+        .order_by(ListingDocument.created_at.desc())
+    )
+    documents = docs_result.scalars().all()
+
+    # Generate signed URLs for viewing
+    s3_service = S3Service()
+
+    return [
+        {
+            "id": doc.id,
+            "file_url": doc.file_url,
+            "signed_url": s3_service.get_signed_url(doc.file_url, expiration=3600),
+            "type": doc.type.value,
+            "title": doc.title,
+            "created_at": doc.created_at.isoformat(),
+        }
+        for doc in documents
+    ]
