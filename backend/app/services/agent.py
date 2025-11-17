@@ -463,25 +463,145 @@ When to escalate:
 
         # Determine final action and confidence
         final_action = "answer"  # Default
-        confidence = 0.8  # Default
+        confidence = 0.8  # Default base confidence
 
         response_text = response.get("content", "")
+
+        # Track confidence factors
+        confidence_factors_positive = []
+        confidence_factors_negative = []
+        concerns = []
+        why_flagged = ""
+
+        # Analyze tools called for confidence factors
+        if tools_called:
+            for tool in tools_called:
+                if tool["name"] == "identify_listing":
+                    result = tool.get("result", {})
+                    if result.get("confidence", 0) >= 0.7:
+                        confidence_factors_positive.append({
+                            "factor": "Listing confidently identified",
+                            "weight": 0.3
+                        })
+                    else:
+                        confidence_factors_negative.append({
+                            "factor": "Listing identification uncertain",
+                            "weight": -0.3
+                        })
+                        concerns.append("Ambiguous listing identification")
+
+                elif tool["name"] == "get_nda_status":
+                    result = tool.get("result", {})
+                    if result.get("has_nda"):
+                        confidence_factors_positive.append({
+                            "factor": "NDA verified",
+                            "weight": 0.2
+                        })
+                    else:
+                        confidence_factors_negative.append({
+                            "factor": "No NDA signed",
+                            "weight": -0.2
+                        })
+
+                elif tool["name"] == "search_listing_knowledge":
+                    result = tool.get("result", {})
+                    if result.get("chunks"):
+                        confidence_factors_positive.append({
+                            "factor": "Relevant documentation found",
+                            "weight": 0.2
+                        })
+                    else:
+                        confidence_factors_negative.append({
+                            "factor": "No relevant documentation found",
+                            "weight": -0.2
+                        })
+                        concerns.append("Insufficient listing documentation")
+        else:
+            # No tools called might indicate simple query
+            confidence_factors_positive.append({
+                "factor": "Standard inquiry pattern",
+                "weight": 0.1
+            })
 
         # Simple heuristics for action determination
         if "escalate" in response_text.lower() or "forward" in response_text.lower():
             final_action = "escalate"
             confidence = 0.3
+            why_flagged = "Agent determined escalation necessary"
+            concerns.append("Question requires broker expertise")
+
+        elif "uncertain" in response_text.lower() or "not sure" in response_text.lower():
+            final_action = "escalate"
+            confidence = 0.4
+            why_flagged = "Agent expressed uncertainty in response"
+            concerns.append("Agent lacks confidence in answer")
 
         elif "nda" in response_text.lower():
             final_action = "ask_nda"
+            # Check if actually requesting NDA or just mentioning
+            if "sign" in response_text.lower() or "confidential" in response_text.lower():
+                confidence_factors_positive.append({
+                    "factor": "Appropriate NDA request",
+                    "weight": 0.1
+                })
 
         elif "meeting" in response_text.lower() or "call" in response_text.lower():
             final_action = "book_meeting"
+
+        # Calculate final confidence from factors
+        positive_weight = sum(f["weight"] for f in confidence_factors_positive)
+        negative_weight = sum(f["weight"] for f in confidence_factors_negative)
+        confidence = max(0.0, min(1.0, confidence + positive_weight + negative_weight))
+
+        # If confidence is low, escalate
+        if confidence < 0.5 and final_action == "answer":
+            final_action = "escalate"
+            why_flagged = f"Low confidence score ({confidence:.2f})"
+            concerns.append("Confidence below acceptable threshold")
+
+        # Build reasoning object
+        reasoning = {
+            "why_flagged": why_flagged if final_action == "escalate" else "",
+            "confidence_factors": {
+                "positive": confidence_factors_positive,
+                "negative": confidence_factors_negative,
+            },
+            "concerns": concerns,
+            "edge_cases": [],  # Can be populated with specific edge case detection
+            "token_usage": response.get("usage", {}),
+            "cost_usd": self._calculate_cost(response.get("usage", {})),
+        }
 
         return {
             "response_text": response_text,
             "tools_called": tools_called,
             "confidence": confidence,
             "final_action": final_action,
+            "reasoning": reasoning,
             "usage": response.get("usage", {}),
         }
+
+    def _calculate_cost(self, usage: Dict[str, Any]) -> float:
+        """
+        Calculate approximate cost in USD for this API call.
+
+        GPT-4 pricing (as of Jan 2024):
+        - Input: $0.03 per 1K tokens
+        - Output: $0.06 per 1K tokens
+
+        Args:
+            usage: Token usage dict from OpenAI
+
+        Returns:
+            Cost in USD
+        """
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+
+        # Pricing per 1K tokens
+        input_cost_per_1k = 0.03
+        output_cost_per_1k = 0.06
+
+        cost = (prompt_tokens / 1000 * input_cost_per_1k) + (completion_tokens / 1000 * output_cost_per_1k)
+
+        return round(cost, 4)

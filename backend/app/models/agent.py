@@ -33,6 +33,7 @@ class AgentRun(Base):
     confidence_score = Column(Numeric(3, 2), nullable=True)  # 0.00 to 1.00
     final_action = Column(SQLEnum(FinalAction), nullable=False)
     error_flag = Column(Boolean, default=False, nullable=False)
+    reasoning = Column(JSON, nullable=True)  # Detailed agent reasoning and confidence factors
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationships

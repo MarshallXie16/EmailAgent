@@ -176,6 +176,343 @@ Allow manual reply composition.
 
 ---
 
+### Week 4 - Dashboard & Admin Panel (Current Focus)
+
+#### EA-DASH-001: Email Activity Log
+**Priority**: High | **Type**: Story | **Estimate**: 8 SP
+
+**Description**:
+Build comprehensive email activity log showing all agent interactions with leads.
+
+**User Story**:
+As a broker, I want to see all emails my agent has sent, so that I can monitor what information is being shared with leads and ensure accuracy.
+
+**Pages**: `/dashboard/activity`, `/dashboard/activity/:threadId`
+
+**Acceptance Criteria**:
+- [ ] Table view with columns: Date, Lead, Listing, Subject, Status (sent/draft), Confidence, Action
+- [ ] Filter by: date range, listing, lead, status, confidence range
+- [ ] Search by subject or email content
+- [ ] Pagination (50 per page)
+- [ ] Click row to view full email thread
+- [ ] Color coding: Green (sent, high confidence), Yellow (draft/needs review), Red (escalated)
+- [ ] Export to CSV functionality
+- [ ] Real-time updates (polling every 30s or websocket)
+
+**Technical Notes**:
+- Query `email_threads` JOIN `email_messages` JOIN `agent_runs`
+- Use DataTable component from shadcn/ui
+- Implement cursor-based pagination for performance
+
+---
+
+#### EA-DASH-002: Review Queue UI
+**Priority**: High | **Type**: Story | **Estimate**: 13 SP
+
+**Description**:
+Build review queue where brokers can review, edit, approve, or reject agent-flagged emails.
+
+**User Story**:
+As a broker, I want to review emails my agent is uncertain about before they're sent, so that I can maintain quality control and prevent mistakes.
+
+**Pages**: `/dashboard/review-queue`, `/dashboard/review-queue/:threadId`
+
+**Acceptance Criteria**:
+- [ ] Queue shows threads with `status=needs_broker` or `requires_review=true`
+- [ ] Card layout with: Lead info, listing, proposed response, agent reasoning
+- [ ] "Why flagged" section showing agent's uncertainty factors
+- [ ] Side-by-side view: conversation history (left), proposed response (right)
+- [ ] Three action buttons:
+  - **Approve & Send** - Sends as-is
+  - **Edit & Send** - Opens composer with pre-filled text
+  - **Manual Reply** - Starts from scratch
+- [ ] Confidence score visualization (progress bar or gauge)
+- [ ] Tools called by agent displayed (badges)
+- [ ] "Mark as resolved" without sending (if lead replied elsewhere)
+- [ ] Priority sorting (lowest confidence first)
+- [ ] Badge count in sidebar navigation
+
+**Technical Notes**:
+- Use shadcn/ui Card, Badge, Textarea, Button components
+- Rich text editor for manual replies (Tiptap or similar)
+- Optimistic UI updates
+
+---
+
+#### EA-DASH-003: Agent Reasoning Display
+**Priority**: High | **Type**: Story | **Estimate**: 5 SP
+
+**Description**:
+Display agent's decision-making process and reasoning for every email interaction.
+
+**User Story**:
+As a broker, I want to understand WHY my agent made each decision, so that I can trust the system and identify areas for improvement.
+
+**Component**: `<AgentReasoningPanel>` (reusable in multiple views)
+
+**Acceptance Criteria**:
+- [ ] Expandable panel showing:
+  - System prompt used
+  - Tools called with inputs/outputs
+  - Confidence score breakdown
+  - Final action determination logic
+  - Any warnings or edge cases identified
+- [ ] Timeline view of tool execution order
+- [ ] Syntax-highlighted JSON for tool inputs/outputs
+- [ ] "Confidence factors" list (e.g., "High: Listing code matched", "Low: No NDA on file")
+- [ ] Token usage and cost for this interaction
+- [ ] Model version used (GPT-4, GPT-3.5, etc.)
+
+**Technical Notes**:
+- Store reasoning in `agent_runs.reasoning` JSON field
+- Use Accordion component for expandable sections
+- Add syntax highlighting library (prism or highlight.js)
+
+---
+
+#### EA-DASH-004: Analytics Dashboard
+**Priority**: High | **Type**: Story | **Estimate**: 8 SP
+
+**Description**:
+Build analytics dashboard showing key metrics and trends for email agent performance.
+
+**User Story**:
+As a broker, I want to see analytics on my agent's performance, so that I can measure ROI and identify optimization opportunities.
+
+**Pages**: `/dashboard` (default landing page)
+
+**Sections**:
+
+**1. KPI Cards** (Top row)
+- Total emails processed (this week)
+- Auto-reply rate (% sent without review)
+- Escalation rate (% flagged for broker)
+- Avg confidence score
+
+**2. Charts**
+- Line chart: Emails per day (last 30 days)
+- Bar chart: Emails by listing (top 10)
+- Pie chart: Final actions breakdown (answered, escalated, NDA requested, meeting booked)
+- Line chart: Confidence trend over time
+
+**3. Recent Activity** (Bottom)
+- Last 10 interactions (mini version of activity log)
+
+**Acceptance Criteria**:
+- [ ] All KPIs calculated correctly from database
+- [ ] Charts are interactive (hover tooltips, click to filter)
+- [ ] Date range selector (7d, 30d, 90d, all time)
+- [ ] Responsive design (mobile-friendly)
+- [ ] Loading states for async data
+- [ ] Auto-refresh every 60 seconds
+- [ ] Export dashboard as PDF
+
+**Technical Notes**:
+- Use Recharts or Chart.js for visualizations
+- Create analytics service to aggregate data
+- Consider materialized views for performance
+
+---
+
+#### EA-API-006: Analytics Endpoints
+**Priority**: High | **Type**: Task | **Estimate**: 5 SP
+
+**Description**:
+Build backend API endpoints to support analytics dashboard.
+
+**Endpoints**:
+
+**GET /api/v1/analytics/overview**
+```json
+{
+  "period": "7d",
+  "total_emails": 156,
+  "auto_reply_rate": 0.73,
+  "escalation_rate": 0.18,
+  "avg_confidence": 0.82,
+  "nda_request_rate": 0.09
+}
+```
+
+**GET /api/v1/analytics/emails**
+Query params: `?start_date=...&end_date=...&listing_id=...&status=...&skip=0&limit=50`
+```json
+{
+  "emails": [
+    {
+      "id": "uuid",
+      "thread_id": "uuid",
+      "lead_name": "John Doe",
+      "lead_email": "john@example.com",
+      "listing_code": "BIZ123",
+      "listing_title": "Coffee Shop",
+      "subject": "Re: Inquiry about BIZ123",
+      "sent_at": "2024-01-17T10:30:00Z",
+      "status": "sent",
+      "sent_by": "agent",
+      "confidence": 0.85,
+      "final_action": "answered",
+      "tools_called": ["identify_listing", "get_listing_summary"]
+    }
+  ],
+  "total": 156,
+  "skip": 0,
+  "limit": 50
+}
+```
+
+**GET /api/v1/analytics/trends**
+```json
+{
+  "daily_counts": [
+    {"date": "2024-01-10", "count": 12},
+    {"date": "2024-01-11", "count": 18},
+    ...
+  ],
+  "by_listing": [
+    {"listing_code": "BIZ123", "count": 45},
+    ...
+  ],
+  "by_action": {
+    "answered": 114,
+    "escalated": 28,
+    "nda_requested": 14
+  }
+}
+```
+
+**Acceptance Criteria**:
+- [ ] All endpoints return correct data
+- [ ] Efficient queries (use indexes, avoid N+1)
+- [ ] Date filtering works correctly
+- [ ] Pagination implemented
+- [ ] Proper error handling (404, 422, 500)
+- [ ] OpenAPI/Swagger docs updated
+- [ ] Tests written (test_analytics.py)
+
+---
+
+#### EA-API-007: Review Queue Endpoints
+**Priority**: High | **Type**: Task | **Estimate**: 5 SP
+
+**Description**:
+Build backend endpoints for review queue functionality.
+
+**Endpoints**:
+
+**GET /api/v1/review-queue**
+```json
+{
+  "threads": [
+    {
+      "id": "uuid",
+      "lead": {...},
+      "listing": {...},
+      "status": "needs_broker",
+      "last_inbound_message": {...},
+      "proposed_response": "...",
+      "agent_reasoning": {
+        "why_flagged": "Lead asked about proprietary financial details not in CIM",
+        "confidence": 0.42,
+        "concerns": ["Potential confidentiality breach", "No NDA signed"],
+        "tools_called": [...]
+      },
+      "created_at": "...",
+      "priority_score": 8.5
+    }
+  ],
+  "total": 12
+}
+```
+
+**POST /api/v1/email-threads/{id}/approve**
+Body: `{"edits": "optional edited response text"}`
+- Sends email (original or edited)
+- Updates thread status to `closed` or `open`
+- Creates EmailMessage record with `sent_by=broker`
+
+**POST /api/v1/email-threads/{id}/manual-reply**
+Body: `{"body_text": "Manual response..."}`
+- Sends custom email
+- Updates thread status
+- Creates EmailMessage record
+
+**POST /api/v1/email-threads/{id}/mark-resolved**
+- Updates thread status without sending
+- For cases where lead replied elsewhere or issue resolved
+
+**Acceptance Criteria**:
+- [ ] Review queue sorted by priority (lowest confidence first)
+- [ ] Approve endpoint sends email via Gmail
+- [ ] Manual reply endpoint validates broker ownership
+- [ ] All actions logged in database
+- [ ] Proper authorization (broker can only act on own threads)
+- [ ] Tests written (test_review_queue.py)
+
+---
+
+#### EA-DB-003: Agent Reasoning Enhancements
+**Priority**: High | **Type**: Task | **Estimate**: 3 SP
+
+**Description**:
+Enhance database schema to store detailed agent reasoning and flagging logic.
+
+**Database Changes**:
+
+**1. Add column to `agent_runs` table:**
+```sql
+ALTER TABLE agent_runs
+ADD COLUMN reasoning JSONB;
+```
+
+**Structure of reasoning JSONB:**
+```json
+{
+  "why_flagged": "Lead asked about proprietary financial details",
+  "confidence_factors": {
+    "positive": [
+      {"factor": "Listing code matched", "weight": 0.3},
+      {"factor": "Standard inquiry pattern", "weight": 0.2}
+    ],
+    "negative": [
+      {"factor": "No NDA signed", "weight": -0.4},
+      {"factor": "Confidential data requested", "weight": -0.5}
+    ]
+  },
+  "concerns": ["Potential confidentiality breach"],
+  "edge_cases": [],
+  "token_usage": {"prompt": 1200, "completion": 450, "total": 1650},
+  "cost_usd": 0.0248
+}
+```
+
+**2. Add column to `email_threads` table:**
+```sql
+ALTER TABLE email_threads
+ADD COLUMN requires_review BOOLEAN DEFAULT FALSE,
+ADD COLUMN priority_score DECIMAL(3,2) DEFAULT 5.0;
+```
+
+**3. Add index for review queue:**
+```sql
+CREATE INDEX idx_threads_review_queue
+ON email_threads (broker_id, requires_review, priority_score DESC)
+WHERE status = 'needs_broker';
+```
+
+**Acceptance Criteria**:
+- [ ] Migration created (Alembic)
+- [ ] AgentService updated to populate reasoning field
+- [ ] Confidence calculation logic documented
+- [ ] Priority score calculation logic implemented
+- [ ] Tests updated to include reasoning field
+
+**Technical Notes**:
+- Priority score = (10 - confidence * 10) + urgency_bonus
+- Urgency based on: time since last email, number of follow-ups, lead type
+
+---
+
 ### Medium Priority (Week 5-6)
 
 #### EA-TEST-002: Expand API Tests
@@ -416,9 +753,11 @@ Customizable email templates.
 - **Completed**: 30 SP
 - **Velocity**: 30 SP/week
 
-### Week 4 (In Planning)
-- **Target**: 35 SP
-- **Focus**: Frontend development + deployment prep
+### Week 4 (In Planning → In Progress)
+- **Planned**: 47 SP
+- **Focus**: Dashboard & Admin Panel (analytics, review queue, agent reasoning)
+- **Tickets**: EA-DASH-001 to EA-DASH-004, EA-API-006 to EA-API-007, EA-DB-003
+- **Backend**: 13 SP | **Frontend**: 34 SP
 
 ---
 

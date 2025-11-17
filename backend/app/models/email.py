@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, Enum as SQLEnum, JSON
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, Enum as SQLEnum, JSON, Boolean, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
@@ -55,6 +55,8 @@ class EmailThread(Base):
     external_thread_id = Column(String(255), nullable=False)  # Gmail thread ID
     status = Column(SQLEnum(ThreadStatus), default=ThreadStatus.OPEN, nullable=False, index=True)
     last_agent_action = Column(SQLEnum(AgentAction), default=AgentAction.NONE, nullable=False)
+    requires_review = Column(Boolean, default=False, nullable=False, index=True)  # Agent flagged for broker review
+    priority_score = Column(Numeric(4, 2), default=5.0, nullable=False)  # 0.00 to 10.00, higher = more urgent
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

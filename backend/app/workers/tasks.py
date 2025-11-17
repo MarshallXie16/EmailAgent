@@ -322,24 +322,45 @@ async def _process_thread_with_agent(db, thread: EmailThread, broker: Broker):
         tools_called=result["tools_called"],
         confidence_score=result["confidence"],
         final_action=FinalAction(result["final_action"]),
+        reasoning=result.get("reasoning", {}),  # Store detailed reasoning
         error_flag=False,
     )
     db.add(agent_run)
+
+    # Calculate priority score (0-10, higher = more urgent)
+    # Priority = (10 - confidence * 10) + urgency_bonus
+    confidence = result["confidence"]
+    priority_score = (1.0 - confidence) * 10  # Inverse of confidence (0-10)
+
+    # Add urgency bonus based on message count (more follow-ups = higher priority)
+    message_count = len(thread.messages)
+    if message_count > 5:
+        priority_score += 2.0
+    elif message_count > 3:
+        priority_score += 1.0
+
+    # Cap at 10.0
+    priority_score = min(10.0, priority_score)
 
     # Determine whether to send or draft
     if result["final_action"] == "escalate":
         thread.status = ThreadStatus.NEEDS_BROKER
         thread.last_agent_action = AgentAction.ESCALATED
+        thread.requires_review = True
+        thread.priority_score = priority_score
         # Don't send email, let broker handle
 
     elif broker.settings.auto_send_enabled:
         # Send email via Gmail
         await _send_agent_response(db, thread, result["response_text"], broker)
         thread.last_agent_action = AgentAction.AUTO_REPLY_SENT
+        thread.requires_review = False
 
     else:
         # Create draft for broker review
         thread.last_agent_action = AgentAction.DRAFT_CREATED
+        thread.requires_review = True  # Flag drafts for review
+        thread.priority_score = priority_score
         # Draft is the last agent_run, broker can view and edit in UI
 
     thread.updated_at = datetime.utcnow()
