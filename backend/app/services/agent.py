@@ -9,6 +9,9 @@ from app.models.listing import Listing, ListingDocumentChunk
 from app.models.lead import NDA, NDAStatus
 from app.models.broker import BrokerSettings
 from app.services.openai_service import OpenAIService
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class AgentTools:
@@ -29,6 +32,11 @@ class AgentTools:
         Returns:
             Dict with listing_id and confidence
         """
+        logger.info(
+            "Agent tool called: identify_listing",
+            extra={"broker_id": broker_id, "email_length": len(email_text)}
+        )
+
         # Search for listings that match keywords in email
         result = await self.db.execute(
             select(Listing).where(
@@ -60,6 +68,14 @@ class AgentTools:
                 best_match = listing
 
         if best_match and best_score >= 5:
+            logger.info(
+                "Listing identified",
+                extra={
+                    "listing_id": str(best_match.id),
+                    "listing_code": best_match.code,
+                    "confidence": min(best_score / 20.0, 1.0),
+                }
+            )
             return {
                 "listing_id": str(best_match.id),
                 "listing_code": best_match.code,
@@ -67,6 +83,7 @@ class AgentTools:
                 "confidence": min(best_score / 20.0, 1.0),
             }
 
+        logger.warning("No listing identified from email text", extra={"broker_id": broker_id})
         return {"listing_id": None, "confidence": 0.0}
 
     async def get_listing_summary(self, listing_id: str) -> Dict[str, Any]:

@@ -227,5 +227,19 @@ Email-based AI assistant for business brokers that processes inquiries in batche
 ### LLM Reliability
 - (Will document common failure modes)
 
+### Structured Logging
+- **Implementation**: JSON-formatted logs using python-json-logger
+- **Log Fields**: timestamp, level, service, logger, module, function, line, request_id, broker_id, thread_id, message, extra
+- **Context Tracking**: ContextVars for request/broker/thread IDs across async operations
+- **Coverage**:
+  - All API requests logged with duration and status
+  - Celery tasks logged (prerun, postrun, failure)
+  - Agent tool calls logged with parameters
+  - Exceptions logged with full stack traces
+- **Request ID**: UUID generated for each API request, propagated through logs
+- **Middleware**: LoggingMiddleware adds request_id header to responses (X-Request-ID)
+- **Celery Signals**: task_prerun, task_postrun, task_failure for comprehensive task logging
+- **Log Levels**: Configurable via settings.LOG_LEVEL (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+
 ## Next Steps
 See `tasks.md` for current implementation priorities.

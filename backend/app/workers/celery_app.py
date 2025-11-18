@@ -2,8 +2,14 @@
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import task_prerun, task_postrun, task_failure
 
 from app.core.config import settings
+from app.core.logging_config import setup_logging, get_logger, set_request_context, clear_request_context
+
+# Initialize structured logging for Celery workers
+setup_logging(log_level=settings.LOG_LEVEL if hasattr(settings, "LOG_LEVEL") else "INFO")
+logger = get_logger(__name__)
 
 # Create Celery app
 celery_app = Celery(
@@ -26,6 +32,49 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
 )
+
+
+# Celery task logging signals
+@task_prerun.connect
+def task_prerun_handler(task_id, task, *args, **kwargs):
+    """Log before task execution."""
+    set_request_context(request_id=task_id)
+    logger.info(
+        "Celery task started",
+        extra={
+            "task_id": task_id,
+            "task_name": task.name,
+            "args": str(args),
+        }
+    )
+
+
+@task_postrun.connect
+def task_postrun_handler(task_id, task, retval, *args, **kwargs):
+    """Log after task execution."""
+    logger.info(
+        "Celery task completed",
+        extra={
+            "task_id": task_id,
+            "task_name": task.name,
+        }
+    )
+    clear_request_context()
+
+
+@task_failure.connect
+def task_failure_handler(task_id, exception, *args, **kwargs):
+    """Log task failures."""
+    logger.error(
+        "Celery task failed",
+        extra={
+            "task_id": task_id,
+            "exception_type": type(exception).__name__,
+            "exception_message": str(exception),
+        },
+        exc_info=True
+    )
+    clear_request_context()
 
 # Periodic tasks (Celery Beat schedule)
 celery_app.conf.beat_schedule = {
