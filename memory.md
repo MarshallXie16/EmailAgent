@@ -241,5 +241,18 @@ Email-based AI assistant for business brokers that processes inquiries in batche
 - **Celery Signals**: task_prerun, task_postrun, task_failure for comprehensive task logging
 - **Log Levels**: Configurable via settings.LOG_LEVEL (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 
+### Docker Production Configuration
+- **Multi-stage builds**: Builder stage (gcc, dependencies) + minimal runtime stage
+- **Image sizes**: API/Worker/Beat ~250MB each (optimized with python:3.11-slim)
+- **Security**: Non-root user (appuser), minimal dependencies, no unnecessary tools
+- **Health checks**: API (30s interval via /health), PostgreSQL (pg_isready), Redis (ping)
+- **Service orchestration**: docker-compose.prod.yml with 5 services
+- **Environment configs**: .env.prod.example with all required/optional variables
+- **Auto-restart**: All services configured with `restart: unless-stopped`
+- **Network isolation**: Internal Docker bridge network
+- **Persistent volumes**: postgres_data, redis_data
+- **Migrations**: Run automatically on API startup
+- **Deployment guide**: DEPLOYMENT.md with operations, troubleshooting, security best practices
+
 ## Next Steps
 See `tasks.md` for current implementation priorities.
