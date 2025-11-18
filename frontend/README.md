@@ -16,6 +16,52 @@ Next.js 14 dashboard for the Email Agent system - an AI-powered email assistant 
 
 ## Features Implemented
 
+### ✅ EA-FRONT-001: Authentication UI
+**Login and session management** (`/login`)
+
+**Features**:
+- Email/password login form
+- JWT token-based authentication (access + refresh tokens)
+- Automatic token refresh on 401 errors
+- Protected routes with automatic redirect to login
+- User profile display in dashboard navigation
+- Logout functionality with token cleanup
+
+**Components**:
+- `<LoginPage>`: Login form with email/password inputs, error handling, and loading states (`/app/login/page.tsx`)
+- `<AuthProvider>`: Context provider managing authentication state (`/contexts/auth-context.tsx`)
+- `<ProtectedRoute>`: Wrapper component for authenticated routes (`/components/protected-route.tsx`)
+- Dashboard layout with navigation and user profile display (`/app/dashboard/layout.tsx`)
+
+**Auth Flow**:
+1. User enters email/password on `/login`
+2. Frontend calls `POST /api/v1/auth/login`
+3. Backend returns `access_token` and `refresh_token`
+4. Tokens stored in localStorage
+5. Profile fetched via `GET /api/v1/brokers/me`
+6. User redirected to `/dashboard`
+7. All API requests include `Authorization: Bearer {token}` header
+8. On 401 error, automatically tries to refresh token via `POST /api/v1/auth/refresh`
+9. If refresh fails, redirects to login
+
+**API Integration**:
+- `POST /api/v1/auth/login` - Login with email/password
+- `POST /api/v1/auth/refresh` - Refresh access token
+- `GET /api/v1/brokers/me` - Get current user profile
+
+**Security**:
+- Tokens stored in localStorage (HTTP-only cookies in production recommended)
+- Automatic token refresh before expiration
+- Protected routes require authentication
+- Logout clears all tokens
+
+**Testing**:
+- Login form component tests (`__tests__/login.test.tsx`)
+- Auth context tests (`__tests__/auth-context.test.tsx`)
+- Tests cover success/failure scenarios, loading states, token management
+
+---
+
 ### ✅ EA-DASH-004: Analytics Dashboard
 **Main dashboard landing page** (`/dashboard`)
 

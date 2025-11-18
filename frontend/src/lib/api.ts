@@ -23,15 +23,48 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
+// Response interceptor for error handling and token refresh
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Token expired, try to refresh or redirect to login
-      localStorage.removeItem('access_token');
-      window.location.href = '/login';
+    const originalRequest = error.config;
+
+    // If 401 and we haven't tried to refresh yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      const refreshToken = localStorage.getItem('refresh_token');
+
+      if (refreshToken) {
+        try {
+          // Try to refresh the token
+          const response = await axios.post(`${API_URL}/api/v1/auth/refresh`, {
+            refresh_token: refreshToken,
+          });
+
+          const { access_token, refresh_token: new_refresh_token } = response.data;
+
+          // Save new tokens
+          localStorage.setItem('access_token', access_token);
+          localStorage.setItem('refresh_token', new_refresh_token);
+
+          // Retry original request with new token
+          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          return apiClient(originalRequest);
+        } catch (refreshError) {
+          // Refresh failed, redirect to login
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          window.location.href = '/login';
+          return Promise.reject(refreshError);
+        }
+      } else {
+        // No refresh token, redirect to login
+        localStorage.removeItem('access_token');
+        window.location.href = '/login';
+      }
     }
+
     return Promise.reject(error);
   }
 );
@@ -73,8 +106,14 @@ export const authApi = {
   login: (email: string, password: string) =>
     apiClient.post('/api/v1/auth/login', { email, password }),
 
+  refresh: (refreshToken: string) =>
+    apiClient.post('/api/v1/auth/refresh', { refresh_token: refreshToken }),
+
+  getProfile: () => apiClient.get('/api/v1/brokers/me'),
+
   logout: () => {
     localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     window.location.href = '/login';
   },
 };
