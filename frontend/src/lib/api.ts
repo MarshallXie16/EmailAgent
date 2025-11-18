@@ -118,4 +118,60 @@ export const authApi = {
   },
 };
 
+// Listings API
+export const listingsApi = {
+  getListings: (params?: {
+    status?: string;
+    search?: string;
+    skip?: number;
+    limit?: number;
+  }) => apiClient.get('/api/v1/listings', { params }),
+
+  getListing: (id: string) =>
+    apiClient.get(`/api/v1/listings/${id}`),
+
+  createListing: (data: {
+    code: string;
+    title: string;
+    status: string;
+    asking_price?: number;
+    revenue?: number;
+    sde?: number;
+    location_region?: string;
+    confidentiality_level: string;
+    short_description?: string;
+    notes?: string;
+  }) => apiClient.post('/api/v1/listings', data),
+
+  updateListing: (id: string, data: Partial<{
+    title: string;
+    status: string;
+    asking_price: number;
+    revenue: number;
+    sde: number;
+    location_region: string;
+    confidentiality_level: string;
+    short_description: string;
+    notes: string;
+  }>) => apiClient.patch(`/api/v1/listings/${id}`, data),
+
+  deleteListing: (id: string) =>
+    apiClient.delete(`/api/v1/listings/${id}`),
+
+  uploadDocument: (listingId: string, file: File, documentType: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_type', documentType);
+
+    return apiClient.post(`/api/v1/listings/${listingId}/documents`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  getDocuments: (listingId: string) =>
+    apiClient.get(`/api/v1/listings/${listingId}/documents`),
+};
+
 export default apiClient;

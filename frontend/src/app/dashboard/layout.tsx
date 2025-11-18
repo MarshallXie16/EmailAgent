@@ -3,7 +3,7 @@
 import { ProtectedRoute } from '@/components/protected-route'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/auth-context'
-import { LogOut, LayoutDashboard, Activity, ClipboardCheck } from 'lucide-react'
+import { LogOut, LayoutDashboard, Activity, ClipboardCheck, Building2 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -22,6 +22,12 @@ export default function DashboardLayout({
       href: '/dashboard',
       icon: LayoutDashboard,
       current: pathname === '/dashboard',
+    },
+    {
+      name: 'Listings',
+      href: '/dashboard/listings',
+      icon: Building2,
+      current: pathname.startsWith('/dashboard/listings'),
     },
     {
       name: 'Review Queue',

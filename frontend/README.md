@@ -62,6 +62,88 @@ Next.js 14 dashboard for the Email Agent system - an AI-powered email assistant 
 
 ---
 
+### ✅ EA-FRONT-003: Listings Management UI
+**Complete CRUD interface for business listings** (`/dashboard/listings`)
+
+**Features**:
+- **Listings Table**:
+  - All broker's listings with pagination
+  - Columns: Code, Title, Location, Asking Price, Revenue, Status, Confidentiality
+  - Status badges (Active, Sold, Archived)
+  - Confidentiality level badges (Low, Medium, High) with color coding
+  - Formatted currency display
+  - Row actions: Edit, Delete/Archive, Manage Documents
+- **Search & Filtering**:
+  - Search by code, title, or description (real-time)
+  - Filter by status (Active, Sold, Archived)
+  - Combined search and filter queries
+- **Create Listing**:
+  - Dialog form with all listing fields
+  - Required fields: Code, Title
+  - Financial fields: Asking Price, Revenue, SDE (optional)
+  - Status and confidentiality level selectors
+  - Short description and internal notes (textarea)
+  - Form validation and error handling
+  - Loading states during creation
+- **Edit Listing**:
+  - Pre-populated form with existing data
+  - Code field disabled (can't change after creation)
+  - All other fields editable
+  - Same validation as create
+- **Delete/Archive Listing**:
+  - Confirmation dialog
+  - Soft delete (sets status to archived)
+  - Cannot be undone warning
+- **Document Management**:
+  - Upload documents for each listing
+  - Document types: CIM, Teaser, Financials, Other
+  - File validation (PDF, DOCX only, max 10MB)
+  - Display existing documents with metadata
+  - File size formatting and upload date
+  - Document type badges
+
+**Components**:
+- `<ListingsPage>`: Main listings page with table and dialogs (`/app/dashboard/listings/page.tsx`)
+- `<ListingDialog>`: Create/edit listing form (`/components/listing-dialog.tsx`)
+- `<DocumentsDialog>`: Document upload and management (`/components/documents-dialog.tsx`)
+- `<Dialog>`: Base dialog component (`/components/ui/dialog.tsx`)
+
+**API Integration**:
+- `GET /api/v1/listings` - List with filters and search
+- `POST /api/v1/listings` - Create listing
+- `GET /api/v1/listings/{id}` - Get single listing
+- `PATCH /api/v1/listings/{id}` - Update listing
+- `DELETE /api/v1/listings/{id}` - Archive listing
+- `POST /api/v1/listings/{id}/documents` - Upload document (multipart/form-data)
+- `GET /api/v1/listings/{id}/documents` - List listing documents
+
+**User Flows**:
+1. **View Listings**: Navigate to /dashboard/listings → See all listings in table
+2. **Search**: Type in search box → Real-time filtering
+3. **Filter**: Select status from dropdown → Filtered results
+4. **Create**: Click "New Listing" → Fill form → Create Listing → Added to table
+5. **Edit**: Click Edit icon → Modify fields → Update Listing → Changes reflected
+6. **Archive**: Click Delete icon → Confirm → Listing archived
+7. **Upload Document**: Click Documents icon → Select type → Choose file → Upload → Document listed
+
+**Testing**:
+- Listings page tests (`__tests__/page.test.tsx`)
+  - Table rendering
+  - Search and filtering
+  - Create/edit/delete workflows
+  - Currency and badge formatting
+  - Empty and loading states
+
+**Design Patterns**:
+- React Query for state management and caching
+- Optimistic UI updates
+- Form state management with controlled inputs
+- Dialog-based modals for actions
+- Real-time search with debouncing (via React Query)
+- Responsive table design
+
+---
+
 ### ✅ EA-DASH-004: Analytics Dashboard
 **Main dashboard landing page** (`/dashboard`)
 
