@@ -105,11 +105,14 @@ class AgentTools:
         Args:
             listing_id: Listing UUID
             query: Search query
-            limit: Number of results
+            limit: Number of results (default 3)
 
         Returns:
-            List of relevant chunks
+            List of relevant chunks with content, metadata, and distance
         """
+        from app.models.listing import ListingDocument, ListingDocumentChunk
+        from sqlalchemy import text
+
         # Generate query embedding
         openai_service = OpenAIService()
         query_embedding = openai_service.create_embedding(query)
@@ -117,18 +120,54 @@ class AgentTools:
         if not query_embedding:
             return []
 
-        # TODO: Implement proper pgvector similarity search
-        # For now, return empty (this requires pgvector extension setup)
-        # Example query would be:
-        # SELECT content, metadata, embedding <-> query_embedding as distance
-        # FROM listing_document_chunks
-        # WHERE listing_document_id IN (
-        #   SELECT id FROM listing_documents WHERE listing_id = listing_id
-        # )
-        # ORDER BY distance
-        # LIMIT limit
+        # Convert embedding to pgvector format
+        # pgvector expects format: '[0.1,0.2,0.3,...]'
+        embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
 
-        return []
+        # Perform vector similarity search using pgvector's <-> operator (cosine distance)
+        # Lower distance = more similar
+        query_sql = text("""
+            SELECT
+                c.id,
+                c.content,
+                c.metadata,
+                c.page_number,
+                d.document_type,
+                d.title,
+                (c.embedding <-> :query_embedding::vector) as distance
+            FROM listing_document_chunks c
+            JOIN listing_documents d ON c.listing_document_id = d.id
+            WHERE d.listing_id = :listing_id
+            ORDER BY distance ASC
+            LIMIT :limit
+        """)
+
+        result = await self.db.execute(
+            query_sql,
+            {
+                "query_embedding": embedding_str,
+                "listing_id": str(listing_id),
+                "limit": limit,
+            }
+        )
+
+        rows = result.fetchall()
+
+        # Format results
+        chunks = []
+        for row in rows:
+            chunks.append({
+                "chunk_id": str(row.id),
+                "content": row.content,
+                "metadata": row.metadata or {},
+                "page_number": row.page_number,
+                "document_type": row.document_type,
+                "document_title": row.title,
+                "distance": float(row.distance),
+                "similarity": 1 - float(row.distance),  # Convert distance to similarity (0-1)
+            })
+
+        return chunks
 
     async def get_nda_status(self, lead_id: str, listing_id: str) -> Dict[str, Any]:
         """

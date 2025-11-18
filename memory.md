@@ -216,7 +216,13 @@ Email-based AI assistant for business brokers that processes inquiries in batche
 - (Will document after implementation)
 
 ### Vector Search Performance
-- (Will document after testing at scale)
+- **Implementation**: pgvector with IVFFlat index using cosine distance operator (<->)
+- **Index configuration**: lists=100 (optimal for ~10K vectors, rule of thumb: sqrt(num_rows))
+- **Embedding format**: String format '[0.1,0.2,...]' for pgvector compatibility
+- **Search returns**: Top 3 chunks by default with content, metadata, distance, and similarity (1-distance)
+- **Performance**: IVFFlat is good for <1M vectors; can scale to HNSW index later if needed
+- **Query pattern**: Raw SQL with SQLAlchemy text() for vector operations
+- **Migration**: Created 002_add_vector_index.py to enable pgvector and create index
 
 ### LLM Reliability
 - (Will document common failure modes)
