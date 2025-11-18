@@ -6,6 +6,10 @@ from celery.signals import task_prerun, task_postrun, task_failure
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging, get_logger, set_request_context, clear_request_context
+from app.core.sentry import init_sentry
+
+# Initialize Sentry error tracking for Celery workers
+init_sentry()
 
 # Initialize structured logging for Celery workers
 setup_logging(log_level=settings.LOG_LEVEL if hasattr(settings, "LOG_LEVEL") else "INFO")

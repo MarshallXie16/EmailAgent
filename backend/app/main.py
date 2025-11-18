@@ -7,7 +7,11 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logging_config import setup_logging, get_logger
+from app.core.sentry import init_sentry, capture_exception
 from app.middleware.logging import LoggingMiddleware
+
+# Initialize Sentry error tracking
+init_sentry()
 
 # Initialize structured logging
 setup_logging(log_level=settings.LOG_LEVEL if hasattr(settings, "LOG_LEVEL") else "INFO")
@@ -56,6 +60,14 @@ app.include_router(api_router, prefix="/api/v1")
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """Global exception handler for unhandled exceptions."""
+    # Capture exception to Sentry
+    capture_exception(
+        exc,
+        path=request.url.path,
+        method=request.method,
+        exception_type=type(exc).__name__,
+    )
+
     # Log the exception with full context
     logger.error(
         "Unhandled exception",

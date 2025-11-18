@@ -254,5 +254,19 @@ Email-based AI assistant for business brokers that processes inquiries in batche
 - **Migrations**: Run automatically on API startup
 - **Deployment guide**: DEPLOYMENT.md with operations, troubleshooting, security best practices
 
+### Sentry Error Tracking
+- **Backend Integration**: FastAPI, Celery, SQLAlchemy, Redis integrations
+- **Frontend Integration**: Next.js client-side and server-side error tracking
+- **Automatic capture**: Unhandled exceptions, HTTP errors, Celery task failures
+- **Performance monitoring**: Transaction sampling (10% production, configurable per environment)
+- **Context enrichment**: User ID, broker ID, request path, environment, release version
+- **Error filtering**: Ignores health checks, timeouts, cancellations (customizable)
+- **Sample rates**: Configurable per environment (production: 10% traces, 1% profiles)
+- **Privacy**: PII scrubbing enabled, no default PII sent
+- **Release tracking**: Git commit SHA tracking for regression detection
+- **Manual capture**: Helper functions for custom error/message capture
+- **Session replay**: Optional frontend session recording (privacy-focused)
+- **Setup guide**: SENTRY_SETUP.md with configuration, best practices, troubleshooting
+
 ## Next Steps
 See `tasks.md` for current implementation priorities.
